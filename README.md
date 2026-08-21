@@ -13,11 +13,12 @@ A local-first browser extension that remembers which email account you used on e
 
 **Firefox 140+**
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Choose **Load Temporary Add-on…** and select `manifest.json`.
-3. Site access is opt-in on Firefox: open the extension's **Permissions** tab and grant access to the sites you want remembered.
+1. Run `node tools/build-firefox.mjs` once (any Node 18+) to generate `dist/firefox/`.
+2. Open `about:debugging#/runtime/this-firefox`.
+3. Choose **Load Temporary Add-on…** and select `dist/firefox/manifest.json`.
+4. Site access is opt-in on Firefox: open the extension's **Permissions** tab and grant access to the sites you want remembered.
 
-No package installation or build step is required.
+No package installation or build step is required for Chrome and other Chromium browsers; the build script exists only because Chrome rejects Firefox-only manifest keys.
 
 ## How the MVP works
 
@@ -31,7 +32,7 @@ No package installation or build step is required.
 
 ## Intentional limitations
 
-- OAuth account selection (Google, Apple, Microsoft, GitHub) is not automatically captured because the relying website generally cannot see the selected provider email. Add it manually from the popup.
+- OAuth account selection (Google, Apple, Microsoft, GitHub) is not automatically captured. Those flows happen on the provider's own domain where no email field exists on the relying site's form, and the account chooser does not reliably expose the selection back to us. Add OAuth accounts manually from the popup.
 - Detection is heuristic. It favors avoiding false positives over capturing every unusual login flow.
 - Domain grouping uses a compact suffix list rather than the full Public Suffix List in this dependency-free MVP.
 - Local data does not sync across devices. Export/import provides a manual backup path; imports are validated and can either replace everything or merge into existing records.

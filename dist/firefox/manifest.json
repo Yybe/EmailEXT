@@ -3,10 +3,17 @@
   "name": "Identity Recall",
   "version": "0.2.2",
   "description": "Remember which email you used on each website. Local-first, no passwords.",
-  "permissions": ["storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "background.js"
+    ]
   },
   "action": {
     "default_title": "Identity Recall",
@@ -28,10 +35,25 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }
-  ]
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "identity-recall@yybe.dev",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  }
 }

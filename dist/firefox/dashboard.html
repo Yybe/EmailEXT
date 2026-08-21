@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Identity Recall — Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><img src="mark.svg" alt=""><span>Identity Recall</span></div>
+      <nav>
+        <button class="nav active" data-view="identities"><span>◫</span> Identities</button>
+        <button class="nav" data-view="settings"><span>⚙</span> Preferences</button>
+      </nav>
+      <div class="privacy-card"><span>⌁</span><div><strong>Local by design</strong><p>Your identity map stays in this browser.</p></div></div>
+    </aside>
+    <main>
+      <section id="identitiesView">
+        <header>
+          <div><p class="eyebrow">Your private identity map</p><h1>Remembered accounts</h1><p class="subtitle">Find which identity you used, in either direction.</p></div>
+          <div class="summary"><strong id="siteTotal">0</strong><span>websites</span><strong id="accountTotal">0</strong><span>accounts</span></div>
+        </header>
+        <div class="search-wrap"><span>⌕</span><input id="search" type="search" placeholder="Search websites or emails…" autofocus><kbd>Esc</kbd></div>
+        <div class="section-label"><span id="resultTitle">Recently used</span><span id="resultCount"></span></div>
+        <div id="sites" class="site-list"></div>
+        <div id="emptyState" class="empty" hidden><div class="orb">✦</div><strong id="emptyTitle">Nothing remembered yet</strong><p id="emptyCopy">Use the web normally. Accounts will appear here after you log in.</p></div>
+      </section>
+      <section id="settingsView" hidden>
+        <header><div><p class="eyebrow">Preferences</p><h1>Quiet by default</h1><p class="subtitle">A small set of controls for how Identity Recall behaves.</p></div></header>
+        <div class="settings-panel">
+          <label class="setting"><div><strong>Website reminders</strong><p>Show a compact reminder when you revisit a known website.</p></div><input id="reminders" type="checkbox"><span class="toggle"></span></label>
+          <div class="setting"><div><strong>Local backup</strong><p>Export your identity map as JSON, then restore it by replacing everything or merging into it.</p></div><div class="actions"><button id="exportButton" class="ghost">Export</button><button id="importButton" class="ghost">Import</button><input id="importInput" type="file" accept="application/json" hidden></div></div>
+          <div class="notice"><strong>How detection works</strong><p>Identity Recall records email submissions when the page also looks like login or registration. It avoids newsletter and contact forms. OAuth providers such as “Continue with Google” cannot reliably reveal which account you selected yet; add those manually from the popup.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <dialog id="editDialog">
+    <form method="dialog" id="editForm">
+      <div class="dialog-head"><div><p class="eyebrow">Correct record</p><h2>Edit account</h2></div><button value="cancel" class="icon-button" aria-label="Close">×</button></div>
+      <label>Email<input id="editEmail" type="email" required></label>
+      <label>Note <span class="muted">optional</span><input id="editNote" type="text" maxlength="80" placeholder="e.g. college account"></label>
+      <div class="dialog-actions"><button id="deleteButton" type="button" class="ghost danger">Remove</button><span></span><button value="cancel" class="ghost">Cancel</button><button id="saveButton" value="default" class="primary">Save changes</button></div>
+    </form>
+  </dialog>
+  <div id="toast" role="status"></div>
+  <script src="dashboard.js"></script>
+</body>
+</html>

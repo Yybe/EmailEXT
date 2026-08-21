@@ -6,14 +6,23 @@ on:
   pull_request:
 
 jobs:
-  addons-linter:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Syntax-check scripts
+        run: |
+          for f in background.js content.js popup.js dashboard.js; do
+            node --check "$f"
+          done
+      - name: Validate root manifest
+        run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('root manifest OK')"
       - name: Install addons-linter
         run: npm install --global addons-linter
-      - name: Lint extension source
-        run: addons-linter . --output=text
+      - name: Build Firefox package
+        run: node tools/build-firefox.mjs
+      - name: Lint Firefox package
+        run: addons-linter dist/firefox --output=text
