@@ -22,6 +22,7 @@ No package installation or build step is required.
 ## How the MVP works
 
 - A content script watches for email submissions in forms that also contain strong login or registration signals.
+- A detected submission is staged per tab first and only saved once navigation shows the sign-in or sign-up actually completed. Abandoned attempts — going back, staying on the form, or visible error messages — are never recorded.
 - Newsletter, contact, sharing, waitlist, and marketing language lowers the detection score to avoid false records.
 - Records are grouped by registrable-style domain, with a small built-in set of common multi-part suffixes such as `co.uk` and `co.in`.
 - Returning to a known website shows a quiet reminder at most once per browser tab session.
