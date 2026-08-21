@@ -1,0 +1,14 @@
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Packaging artifacts
+*.zip
+*.crx
+*.pem
