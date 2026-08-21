@@ -8,3 +8,4 @@ form { display:flex;gap:7px;margin-top:12px }
 input { min-width:0;flex:1;background:var(--panel-2);border:1px solid transparent;color:var(--text);outline:0;border-radius:9px;padding:9px 10px }
 input:focus { border-color:var(--accent) }
 .privacy { text-align:center;color:var(--muted);font-size:10px;margin:12px 0 0 }
+.error { color:var(--danger);font-size:11px;margin:8px 0 0;text-align:center }

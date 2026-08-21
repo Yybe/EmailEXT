@@ -42,11 +42,26 @@ async function load() {
 
 $("#addForm").addEventListener("submit", async event => {
   event.preventDefault();
-  const email = $("#emailInput").value.trim();
-  const response = await chrome.runtime.sendMessage({ type:"RECORD_ACCOUNT", payload:{ email, hostname:currentHostname, source:"manual", confidence:1 } });
-  if (response.ok) {
-    $("#emailInput").value = "";
-    render(response.site, response.site.siteKey);
+  const input = $("#emailInput");
+  const errorNode = $("#addError");
+  errorNode.hidden = true;
+  if (!currentHostname) {
+    errorNode.textContent = "Open a website first, then add its account here.";
+    errorNode.hidden = false;
+    return;
+  }
+  try {
+    const response = await chrome.runtime.sendMessage({ type:"RECORD_ACCOUNT", payload:{ email: input.value.trim(), hostname: currentHostname, source:"manual", confidence:1 } });
+    if (response.ok) {
+      input.value = "";
+      render(response.site, response.site.siteKey);
+    } else {
+      errorNode.textContent = response.error || "Could not save this email.";
+      errorNode.hidden = false;
+    }
+  } catch {
+    errorNode.textContent = "Extension is starting up — try again.";
+    errorNode.hidden = false;
   }
 });
 $("#openDashboard").addEventListener("click", () => chrome.runtime.openOptionsPage());

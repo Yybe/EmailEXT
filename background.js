@@ -1,7 +1,7 @@
 const STORAGE_KEY = "identityRecallRecords";
 const SETTINGS_KEY = "identityRecallSettings";
 
-const BACKUP_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function isValidTimestamp(value) {
   return Number.isFinite(value) && value > 0;
@@ -60,6 +60,16 @@ async function writeRecords(records) {
   await chrome.storage.local.set({ [STORAGE_KEY]: records });
 }
 
+// Serializes all read-modify-write cycles on the records blob so concurrent
+// messages (e.g. simultaneous logins in two tabs) cannot interleave and lose updates.
+let recordsLock = Promise.resolve();
+
+function withRecordsLock(task) {
+  const result = recordsLock.then(task);
+  recordsLock = result.then(() => {}, () => {});
+  return result;
+}
+
 function publicSite(site) {
   if (!site) return null;
   return {
@@ -72,34 +82,37 @@ async function recordAccount(payload) {
   const email = normalizeEmail(payload.email);
   const hostname = (payload.hostname || "").toLowerCase();
   const siteKey = siteKeyFromHostname(hostname);
-  if (!email || !siteKey || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false };
+  if (!EMAIL_RE.test(email)) return { ok: false, error: "Enter a valid email address" };
+  if (!siteKey) return { ok: false, error: "Open a website to remember an account for it" };
 
-  const { records } = await readState();
-  const now = Date.now();
-  const site = records[siteKey] || {
-    siteKey,
-    hostname,
-    hostnames: [],
-    createdAt: now,
-    updatedAt: now,
-    accounts: {}
-  };
-  if (!site.hostnames.includes(hostname)) site.hostnames.push(hostname);
-  const previous = site.accounts[email];
-  site.accounts[email] = {
-    email,
-    firstUsedAt: previous?.firstUsedAt || now,
-    lastUsedAt: now,
-    useCount: (previous?.useCount || 0) + 1,
-    source: payload.source || "detected",
-    confidence: Math.max(previous?.confidence || 0, payload.confidence || 0),
-    note: previous?.note || ""
-  };
-  site.updatedAt = now;
-  site.hostname = hostname || site.hostname;
-  records[siteKey] = site;
-  await writeRecords(records);
-  return { ok: true, site: publicSite(site) };
+  return withRecordsLock(async () => {
+    const { records } = await readState();
+    const now = Date.now();
+    const site = records[siteKey] || {
+      siteKey,
+      hostname,
+      hostnames: [],
+      createdAt: now,
+      updatedAt: now,
+      accounts: {}
+    };
+    if (!site.hostnames.includes(hostname)) site.hostnames.push(hostname);
+    const previous = site.accounts[email];
+    site.accounts[email] = {
+      email,
+      firstUsedAt: previous?.firstUsedAt || now,
+      lastUsedAt: now,
+      useCount: (previous?.useCount || 0) + 1,
+      source: payload.source || "detected",
+      confidence: Math.max(previous?.confidence || 0, payload.confidence || 0),
+      note: previous?.note || ""
+    };
+    site.updatedAt = now;
+    site.hostname = hostname || site.hostname;
+    records[siteKey] = site;
+    await writeRecords(records);
+    return { ok: true, site: publicSite(site) };
+  });
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -123,30 +136,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ sites: Object.values(records).map(publicSite).sort((a, b) => b.updatedAt - a.updatedAt), settings });
         break;
       case "DELETE_ACCOUNT": {
-        const site = records[message.siteKey];
-        if (site) {
-          delete site.accounts[normalizeEmail(message.email)];
-          if (!Object.keys(site.accounts).length) delete records[message.siteKey];
-          else site.updatedAt = Date.now();
-          await writeRecords(records);
-        }
-        sendResponse({ ok: true });
+        sendResponse(await withRecordsLock(async () => {
+          const { records } = await readState();
+          const site = records[message.siteKey];
+          if (site) {
+            delete site.accounts[normalizeEmail(message.email)];
+            if (!Object.keys(site.accounts).length) delete records[message.siteKey];
+            else site.updatedAt = Date.now();
+            await writeRecords(records);
+          }
+          return { ok: true };
+        }));
         break;
       }
       case "UPDATE_ACCOUNT": {
-        const site = records[message.siteKey];
-        const oldEmail = normalizeEmail(message.oldEmail);
-        const newEmail = normalizeEmail(message.newEmail);
-        if (!site?.accounts[oldEmail] || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
-          sendResponse({ ok: false });
-          break;
-        }
-        const account = { ...site.accounts[oldEmail], email: newEmail, note: (message.note || "").trim() };
-        delete site.accounts[oldEmail];
-        site.accounts[newEmail] = account;
-        site.updatedAt = Date.now();
-        await writeRecords(records);
-        sendResponse({ ok: true });
+        sendResponse(await withRecordsLock(async () => {
+          const { records } = await readState();
+          const site = records[message.siteKey];
+          const oldEmail = normalizeEmail(message.oldEmail);
+          const newEmail = normalizeEmail(message.newEmail);
+          if (!site?.accounts[oldEmail] || !EMAIL_RE.test(newEmail)) {
+            return { ok: false, error: "Enter a valid email address" };
+          }
+          const account = { ...site.accounts[oldEmail], email: newEmail, note: (message.note || "").trim() };
+          delete site.accounts[oldEmail];
+          site.accounts[newEmail] = account;
+          site.updatedAt = Date.now();
+          await writeRecords(records);
+          return { ok: true };
+        }));
         break;
       }
       case "SAVE_SETTINGS":
@@ -159,7 +177,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false, error });
           break;
         }
-        await chrome.storage.local.set({ [STORAGE_KEY]: message.data.records });
+        await withRecordsLock(async () => {
+          await chrome.storage.local.set({ [STORAGE_KEY]: message.data.records });
+        });
         sendResponse({ ok: true });
         break;
       }

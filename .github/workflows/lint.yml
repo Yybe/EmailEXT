@@ -1,0 +1,19 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  addons-linter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install addons-linter
+        run: npm install --global addons-linter
+      - name: Lint extension source
+        run: addons-linter . --output=text
