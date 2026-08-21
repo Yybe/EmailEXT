@@ -58,9 +58,26 @@ $("#search").addEventListener("input",render);
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&!$("#editDialog").open){$("#search").value="";render()}});
 document.querySelectorAll(".nav").forEach(button=>button.addEventListener("click",()=>{document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("active",n===button));const settingsView=button.dataset.view==="settings";$("#settingsView").hidden=!settingsView;$("#identitiesView").hidden=settingsView;}));
 $("#reminders").addEventListener("change",async e=>{await chrome.runtime.sendMessage({type:"SAVE_SETTINGS",settings:{reminders:e.target.checked}});toast("Preference saved")});
-$("#saveButton").addEventListener("click",async e=>{e.preventDefault();if(!$("#editForm").reportValidity())return;const result=await chrome.runtime.sendMessage({type:"UPDATE_ACCOUNT",...editing,newEmail:$("#editEmail").value,note:$("#editNote").value});if(result.ok){$("#editDialog").close();await reload();toast("Account updated")}});
+$("#saveButton").addEventListener("click",async e=>{e.preventDefault();if(!$("#editForm").reportValidity())return;const result=await chrome.runtime.sendMessage({type:"UPDATE_ACCOUNT",...editing,newEmail:$("#editEmail").value,note:$("#editNote").value});if(result.ok){$("#editDialog").close();await reload();toast("Account updated")}else{toast(result.error||"Could not update account")}});
 $("#deleteButton").addEventListener("click",async()=>{if(!editing)return;await chrome.runtime.sendMessage({type:"DELETE_ACCOUNT",siteKey:editing.siteKey,email:editing.oldEmail});$("#editDialog").close();await reload();toast("Account removed")});
 $("#exportButton").addEventListener("click",async()=>{const stored=await chrome.storage.local.get("identityRecallRecords");const blob=new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),records:stored.identityRecallRecords||{}},null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`identity-recall-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);toast("Backup exported")});
-$("#importButton").addEventListener("click",()=>{if(sites.length&&!confirm("Import replaces every remembered website with the contents of the backup file. Continue?"))return;$("#importInput").click()});
-$("#importInput").addEventListener("change",async e=>{try{const data=JSON.parse(await e.target.files[0].text());const result=await chrome.runtime.sendMessage({type:"IMPORT_DATA",data});if(!result.ok)throw new Error(result.error);await reload();toast("Backup restored")}catch(err){toast(err.message || "Could not import backup")}e.target.value=""});
+$("#importButton").addEventListener("click",()=>$("#importInput").click());
+$("#importInput").addEventListener("change",async e=>{
+  const input=e.target;
+  try{
+    const data=JSON.parse(await input.files[0].text());
+    const incomingCount=Object.keys(data&&data.records||{}).length;
+    let mode=null;
+    if(!sites.length) mode="replace";
+    else if(confirm(`Replace all ${sites.length} remembered website${sites.length===1?"":"s"} with the ${incomingCount} in this backup?`)) mode="replace";
+    else if(confirm("Keep current data and merge the backup into it instead?")) mode="merge";
+    if(mode){
+      const result=await chrome.runtime.sendMessage({type:"IMPORT_DATA",data,mode});
+      if(!result.ok) throw new Error(result.error);
+      await reload();
+      toast(mode==="merge"?"Backup merged":"Backup restored");
+    }
+  }catch(err){toast(err.message||"Could not import backup")}
+  input.value="";
+});
 reload();

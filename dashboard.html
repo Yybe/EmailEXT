@@ -32,8 +32,8 @@
         <header><div><p class="eyebrow">Preferences</p><h1>Quiet by default</h1><p class="subtitle">A small set of controls for how Identity Recall behaves.</p></div></header>
         <div class="settings-panel">
           <label class="setting"><div><strong>Website reminders</strong><p>Show a compact reminder when you revisit a known website.</p></div><input id="reminders" type="checkbox"><span class="toggle"></span></label>
-          <div class="setting"><div><strong>Local backup</strong><p>Export or restore your identity map as a JSON file.</p></div><div class="actions"><button id="exportButton" class="ghost">Export</button><button id="importButton" class="ghost">Import</button><input id="importInput" type="file" accept="application/json" hidden></div></div>
-          <div class="notice"><strong>What version 0.1 detects</strong><p>Identity Recall records email submissions when the page also looks like login or registration. It avoids newsletter and contact forms. OAuth providers such as “Continue with Google” cannot reliably reveal which account you selected yet; add those manually from the popup.</p></div>
+          <div class="setting"><div><strong>Local backup</strong><p>Export your identity map as JSON, then restore it by replacing everything or merging into it.</p></div><div class="actions"><button id="exportButton" class="ghost">Export</button><button id="importButton" class="ghost">Import</button><input id="importInput" type="file" accept="application/json" hidden></div></div>
+          <div class="notice"><strong>How detection works</strong><p>Identity Recall records email submissions when the page also looks like login or registration. It avoids newsletter and contact forms. OAuth providers such as “Continue with Google” cannot reliably reveal which account you selected yet; add those manually from the popup.</p></div>
         </div>
       </section>
     </main>

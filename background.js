@@ -115,6 +115,40 @@ async function recordAccount(payload) {
   });
 }
 
+// Merges a validated backup into existing records without losing data.
+// Rules keep repeated imports idempotent: useCount takes the max (not the
+// sum), timestamps take the extremes, and an existing note wins over blank.
+function mergeSiteRecords(records, incoming) {
+  for (const [siteKey, site] of Object.entries(incoming)) {
+    const target = records[siteKey];
+    if (!target || typeof target !== "object") {
+      records[siteKey] = site;
+      continue;
+    }
+    for (const hostname of site.hostnames || []) {
+      if (!target.hostnames.includes(hostname)) target.hostnames.push(hostname);
+    }
+    target.hostname = site.updatedAt > target.updatedAt ? site.hostname : target.hostname;
+    target.createdAt = Math.min(target.createdAt, site.createdAt);
+    for (const [email, account] of Object.entries(site.accounts)) {
+      const previous = target.accounts[email];
+      if (!previous) {
+        target.accounts[email] = account;
+        continue;
+      }
+      target.accounts[email] = {
+        ...account,
+        firstUsedAt: Math.min(previous.firstUsedAt, account.firstUsedAt),
+        lastUsedAt: Math.max(previous.lastUsedAt, account.lastUsedAt),
+        useCount: Math.max(previous.useCount, account.useCount),
+        confidence: Math.max(previous.confidence || 0, account.confidence || 0),
+        note: previous.note || account.note || ""
+      };
+    }
+    target.updatedAt = Math.max(target.updatedAt, site.updatedAt);
+  }
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   const { settings } = await readState();
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
@@ -122,19 +156,21 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
-    const { records, settings } = await readState();
     switch (message.type) {
       case "RECORD_ACCOUNT":
         sendResponse(await recordAccount({ ...message.payload, hostname: message.payload.hostname || sender.tab?.url && new URL(sender.tab.url).hostname }));
         break;
       case "GET_SITE": {
+        const { records, settings } = await readState();
         const key = siteKeyFromHostname(message.hostname || "");
         sendResponse({ site: publicSite(records[key]), settings, siteKey: key });
         break;
       }
-      case "GET_ALL":
+      case "GET_ALL": {
+        const { records, settings } = await readState();
         sendResponse({ sites: Object.values(records).map(publicSite).sort((a, b) => b.updatedAt - a.updatedAt), settings });
         break;
+      }
       case "DELETE_ACCOUNT": {
         sendResponse(await withRecordsLock(async () => {
           const { records } = await readState();
@@ -155,9 +191,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const site = records[message.siteKey];
           const oldEmail = normalizeEmail(message.oldEmail);
           const newEmail = normalizeEmail(message.newEmail);
-          if (!site?.accounts[oldEmail] || !EMAIL_RE.test(newEmail)) {
-            return { ok: false, error: "Enter a valid email address" };
-          }
+          if (!site?.accounts[oldEmail]) return { ok: false, error: "That account no longer exists" };
+          if (!EMAIL_RE.test(newEmail)) return { ok: false, error: "Enter a valid email address" };
+          if (oldEmail !== newEmail && site.accounts[newEmail]) return { ok: false, error: "That email is already saved for this website" };
           const account = { ...site.accounts[oldEmail], email: newEmail, note: (message.note || "").trim() };
           delete site.accounts[oldEmail];
           site.accounts[newEmail] = account;
@@ -167,20 +203,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }));
         break;
       }
-      case "SAVE_SETTINGS":
+      case "SAVE_SETTINGS": {
+        const { settings } = await readState();
         await chrome.storage.local.set({ [SETTINGS_KEY]: { ...settings, ...message.settings } });
         sendResponse({ ok: true });
         break;
+      }
       case "IMPORT_DATA": {
         const error = validateBackupRecords(message.data?.records);
         if (error) {
           sendResponse({ ok: false, error });
           break;
         }
-        await withRecordsLock(async () => {
-          await chrome.storage.local.set({ [STORAGE_KEY]: message.data.records });
-        });
-        sendResponse({ ok: true });
+        const mode = message.mode === "merge" ? "merge" : "replace";
+        sendResponse(await withRecordsLock(async () => {
+          if (mode === "replace") {
+            await chrome.storage.local.set({ [STORAGE_KEY]: message.data.records });
+            return { ok: true };
+          }
+          const { records } = await readState();
+          mergeSiteRecords(records, message.data.records);
+          await writeRecords(records);
+          return { ok: true };
+        }));
         break;
       }
       default:
