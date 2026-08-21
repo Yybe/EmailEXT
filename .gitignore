@@ -12,3 +12,4 @@ Desktop.ini
 *.zip
 *.crx
 *.pem
+dist/
