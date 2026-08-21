@@ -1,6 +1,29 @@
 const STORAGE_KEY = "identityRecallRecords";
 const SETTINGS_KEY = "identityRecallSettings";
 
+const BACKUP_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function isValidTimestamp(value) {
+  return Number.isFinite(value) && value > 0;
+}
+
+function validateBackupRecords(records) {
+  if (!records || typeof records !== "object" || Array.isArray(records)) return "Invalid backup file";
+  for (const [siteKey, site] of Object.entries(records)) {
+    if (!siteKey || !site || typeof site !== "object" || Array.isArray(site)) return "Invalid website entry in backup";
+    if (!site.accounts || typeof site.accounts !== "object" || Array.isArray(site.accounts)) return `Invalid accounts for ${siteKey}`;
+    if (!isValidTimestamp(site.createdAt) || !isValidTimestamp(site.updatedAt)) return `Invalid timestamps for ${siteKey}`;
+    for (const [email, account] of Object.entries(site.accounts)) {
+      if (!BACKUP_EMAIL_RE.test(email)) return "Invalid email address in backup";
+      if (!account || typeof account !== "object" || Array.isArray(account)) return "Invalid account entry in backup";
+      if (!isValidTimestamp(account.firstUsedAt) || !isValidTimestamp(account.lastUsedAt)) return `Invalid timestamps for ${email}`;
+      if (!Number.isFinite(account.useCount) || account.useCount < 1) return `Invalid usage count for ${email}`;
+      if (account.note !== undefined && typeof account.note !== "string") return `Invalid note for ${email}`;
+    }
+  }
+  return null;
+}
+
 const DEFAULT_SETTINGS = {
   reminders: true,
   reminderCooldownHours: 24
@@ -131,12 +154,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true });
         break;
       case "IMPORT_DATA": {
-        const incoming = message.data?.records;
-        if (!incoming || typeof incoming !== "object") {
-          sendResponse({ ok: false, error: "Invalid backup file" });
+        const error = validateBackupRecords(message.data?.records);
+        if (error) {
+          sendResponse({ ok: false, error });
           break;
         }
-        await chrome.storage.local.set({ [STORAGE_KEY]: incoming });
+        await chrome.storage.local.set({ [STORAGE_KEY]: message.data.records });
         sendResponse({ ok: true });
         break;
       }
