@@ -18,6 +18,8 @@ jobs:
           for f in background.js content.js popup.js dashboard.js; do
             node --check "$f"
           done
+      - name: Pipeline tests
+        run: node tests/pipeline.test.js
       - name: Validate root manifest
         run: node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8')); console.log('root manifest OK')"
       - name: Install addons-linter

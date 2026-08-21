@@ -6,12 +6,21 @@
   const NEGATIVE = /\b(newsletter|subscribe|contact|message|send to|share|invite|updates|marketing|mailing list|notify me|early access|waitlist)\b/i;
   // Auth-flow confirmation: candidates are staged per-tab on submit and only
   // written to storage once navigation shows the auth flow actually completed.
-  const AUTH_URL_RE = /(log[ -]?in|sign[ -]?in|sign[ -]?up|signup|register|registration|create[-_]?account|auth(?:enticate|orize)?|session|onboard|join)/i;
+  // Verification intermediates (2FA, OTP, magic-link, reset) count as auth so a
+  // half-finished flow never looks like a successful landing page.
+  const AUTH_URL_RE = /(log[ -]?in|sign[ -]?in|sign[ -]?up|signup|register|registration|create[-_]?account|auth(?:enticate|orize)?|session|onboard|join|verify|verification|two[-_]?factor|2fa|mfa|otp|one[-_]?time|passcode|magic[-_]?link|check[-_]?email|email[-_]?sent|unlock|recover|reset)/i;
   const FAILURE_TEXT_RE = /(already\s+(?:exists|registered|has\s+an?\s+account)|no\s+(?:account|user)\s+(?:found|exists)|couldn'?t\s+find|(?:incorrect|wrong)\s+(?:password|username|email|credentials)|invalid\s+(?:password|username|credentials)|(?:account|user)\s+not\s+found)/i;
   const PENDING_KEY = "identityRecallPending";
   const PENDING_TTL_MS = 600000;
+  const SETTLE_MS = 3000;
+  // Per-document identity + client-side route depth. performance.navigation
+  // cannot see SPA route changes, so backward movement inside an app is
+  // detected by comparing pushState/popstate depth against the staged depth.
+  const DOC_ID = Math.random().toString(36).slice(2);
+  let spaDepth = 0;
   let lastRecorded = { value: "", at: 0 };
   let watching = false;
+  let settleTimer = null;
 
   function textFor(element) {
     if (!element) return "";
@@ -60,16 +69,24 @@
   // Pure decision core: given a staged attempt and where the user is now,
   // decide whether the auth flow completed ("confirm"), failed or was
   // abandoned ("discard"), or is still in progress ("wait").
-  function decideResolution(pending, currentUrl, navigationType, formVisible, now) {
+  // Backward movement — a full-page back/forward load, or an SPA route change
+  // that drops the client-side depth at or below the staged depth — always
+  // discards, even when the destination is not an auth URL: going back to a
+  // home or feed page is how an abandoned signup exits, not how success looks.
+  function decideResolution(pending, ctx) {
     if (!pending?.email) return "discard";
-    if (now - pending.stagedAt > PENDING_TTL_MS) return "discard";
+    if (ctx.now - pending.stagedAt > PENDING_TTL_MS) return "discard";
     let current;
-    try { current = new URL(currentUrl); } catch { return "wait"; }
-    const authHere = AUTH_URL_RE.test(current.pathname);
-    if (navigationType === "back_forward" && authHere) return "discard";
-    if (!authHere) return "confirm";
-    if (currentUrl !== pending.stagedUrl) return "wait";
-    return formVisible ? "wait" : "confirm";
+    try { current = new URL(ctx.url); } catch { return "wait"; }
+    const movedBackward =
+      ctx.navType === "back_forward" ||
+      (ctx.docId === pending.docId &&
+        ctx.url !== pending.stagedUrl &&
+        ctx.spaDepth <= pending.stagedDepth);
+    if (movedBackward) return "discard";
+    if (!AUTH_URL_RE.test(current.pathname)) return "confirm";
+    if (ctx.url !== pending.stagedUrl) return "wait";
+    return ctx.formVisible ? "wait" : "confirm";
   }
 
   function confirmPending(pending) {
@@ -91,7 +108,9 @@
       confidence: Math.min(1, candidate.score / 10),
       source,
       stagedAt: now,
-      stagedUrl: location.href
+      stagedUrl: location.href,
+      docId: DOC_ID,
+      stagedDepth: spaDepth
     });
     evaluate();
   }
@@ -105,11 +124,45 @@
     try { return performance.getEntriesByType("navigation")[0]?.type || ""; } catch { return ""; }
   }
 
+  function snapshotCtx() {
+    return {
+      url: location.href,
+      navType: currentNavigationType(),
+      spaDepth,
+      docId: DOC_ID,
+      formVisible: authFormVisible(),
+      now: Date.now()
+    };
+  }
+
+  // Never record on first sight of a non-auth page: wait out redirect chains,
+  // then re-check. If the bounce landed back on auth or an error appeared, the
+  // attempt was not a success.
+  function scheduleConfirm(pending) {
+    if (settleTimer !== null) return;
+    settleTimer = setTimeout(() => {
+      settleTimer = null;
+      const current = readPending();
+      if (!current || current.stagedAt !== pending.stagedAt) return;
+      if (FAILURE_TEXT_RE.test((document.body?.innerText || "").slice(0, 4000))) return clearPending();
+      if (decideResolution(current, snapshotCtx()) === "confirm") confirmPending(current);
+    }, SETTLE_MS);
+  }
+
   function evaluate() {
     const pending = readPending();
     if (!pending) return;
-    const decision = decideResolution(pending, location.href, currentNavigationType(), authFormVisible(), Date.now());
-    if (decision === "confirm") return confirmPending(pending);
+    // A fresh document invalidates the previous document's SPA depth baseline:
+    // depth restarts at zero AND the staged URL rebases to this page, otherwise
+    // every full-page landing would read as backward movement.
+    if (pending.docId !== DOC_ID) {
+      pending.docId = DOC_ID;
+      pending.stagedDepth = 0;
+      pending.stagedUrl = location.href;
+      writePending(pending);
+    }
+    const decision = decideResolution(pending, snapshotCtx());
+    if (decision === "confirm") return scheduleConfirm(pending);
     if (decision === "discard") return clearPending();
     if (location.href !== pending.stagedUrl) {
       pending.stagedUrl = location.href;
@@ -119,12 +172,13 @@
   }
 
   // Same-page resolution window: covers SPA logins that never navigate and
-  // full reloads of the same auth URL. If the form disappears the login
-  // completed; failure text or a still-present form discards the attempt.
+  // full reloads of the same auth URL. Uniform 3s checks over an ~18s window;
+  // if the form disappears the login completed, failure text or a
+  // still-present form discards the attempt.
   function watchBriefly(staged) {
     if (watching) return;
     watching = true;
-    const delays = [2000, 4000, 9000];
+    const delays = [3000, 3000, 3000, 3000, 3000];
     let index = 0;
     const tick = () => {
       const current = readPending();
@@ -134,8 +188,8 @@
         watching = false;
         return;
       }
-      const decision = decideResolution(current, location.href, currentNavigationType(), authFormVisible(), Date.now());
-      if (decision === "confirm") { confirmPending(current); watching = false; return; }
+      const decision = decideResolution(current, snapshotCtx());
+      if (decision === "confirm") { scheduleConfirm(current); watching = false; return; }
       if (decision === "discard") { clearPending(); watching = false; return; }
       if (location.href !== current.stagedUrl) {
         current.stagedUrl = location.href;
@@ -177,17 +231,20 @@
     if (candidate) stagePending({ ...candidate, score: candidate.score + 1 }, "auth-click");
   }, true);
 
-  // SPA transitions that swap views without a full page load.
+  // SPA transitions that swap views without a full page load. Depth increases
+  // on pushed/replaced routes and decreases on popstate, so returning to a
+  // route at or below the staged depth is detectable as backward movement.
   const wrapHistory = type => {
     const original = history[type];
     history[type] = function (...args) {
       const result = original.apply(this, args);
+      spaDepth += 1;
       evaluate();
       return result;
     };
   };
   try { wrapHistory("pushState"); wrapHistory("replaceState"); } catch {}
-  window.addEventListener("popstate", evaluate);
+  window.addEventListener("popstate", () => { spaDepth -= 1; evaluate(); });
   window.addEventListener("hashchange", evaluate);
 
   // Resolve any attempt staged by a previous page in this tab.
@@ -279,4 +336,16 @@
       if (response?.settings?.reminders) showReminder(response.site, response.settings.reminderCooldownHours || 24);
     } catch {}
   }, 1100);
+
+  // Test hook: no-op in the browser, used by the node VM test harness.
+  if (globalThis.__IDENTITY_RECALL_TEST__) {
+    globalThis.__IDENTITY_RECALL_TEST__({
+      decideResolution,
+      stagePending,
+      evaluate,
+      readPending,
+      clearPending,
+      context: snapshotCtx
+    });
+  }
 })();
